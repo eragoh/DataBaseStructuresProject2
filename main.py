@@ -21,14 +21,12 @@ class Page:
             # assign it to overflow of a record
             for entry in reversed(self.page_entries):
                 if record.key > entry.key:
-                    if entry.overflowPointer is None:
-                        entry.overflowPointer = record
-                        break
-                    else:
-                        pass #rekurencja do rozrysowania
+                    return entry  # return start of overflow chain
+            return "ERROR 404"
         else:
             self.page_entries.append(record)
             self.page_entries.sort(key=sortingKey)
+            return 'inserted'
 
 
 class Index:
@@ -38,8 +36,8 @@ class Index:
 
     def getPage(self, key):
         for i in range(key, -1, -1):
-            if self.key_page_dictionary[key]:
-                return self.key_page_dictionary[key]
+            if i in self.key_page_dictionary:
+                return self.key_page_dictionary[i]
         return None  # None, if no page corresponding with such key found
 
     def makeEntry(self, key, page):
@@ -59,19 +57,29 @@ class Record:
 
 
 class PrimaryArea:
-    pages_number = 0
+    pages = []
 
     def __init__(self):
         pass
 
     def makePage(self):
-        self.pages_number += 1
         new_page = Page()
+        self.pages.append(new_page)  # HERE WRITE TO FILE INSTEAD
         return new_page
 
 
 class OverflowArea:
-    pass
+    records = []
+
+    def addRecordToChain(self, record, chain_start):
+        self.getLastRecordInChain(chain_start).overflowPointer = record  # insert record at the end of chain
+        self.records.append(record)  # HERE WRITE TO FILE INSTEAD
+
+    def getLastRecordInChain(self, record):
+        if record.overflowPointer is None:
+            return record
+        else:
+            return self.getLastRecordInChain(record.overflowPointer)
 
 
 class IndexedSequentialFile:
@@ -84,6 +92,16 @@ class IndexedSequentialFile:
         if page is None:
             page = self.primary_area.makePage()
             self.index.makeEntry(record.key, page)
-        page.insertRecord(record)
+        result = page.insertRecord(record)
+        if result != 'inserted':
+            self.overflow_area.addRecordToChain(record, result)
 
-    pass  # Level? Arrays of Indexes/Cylinders?
+
+ISFile = IndexedSequentialFile()
+ISFile.insertRecord(Record(1))
+ISFile.insertRecord(Record(4))
+ISFile.insertRecord(Record(7))
+ISFile.insertRecord(Record(2))
+ISFile.insertRecord(Record(9))
+ISFile.insertRecord(Record(8))
+print('x')
