@@ -6,15 +6,15 @@
 
 import bisect
 from os.path import getsize
+from pickle import dump as serialize
+from pickle import load as deserialize
+import pickle
 
 RECORDS_PER_PAGE = 4  # Blocking factor for primary area
 DISK_READS = 0
 DISK_WRITES = 0
 ALPHA = 0.5  # How much of each page is utilise after each reorganization
-
-
-def searchKey(o):
-    return o.key
+PAGE_BYTES_SIZE_LIMIT = 2048
 
 
 class FileManager:
@@ -29,28 +29,18 @@ class FileManager:
         with open(file, "w") as f:
             return f.write(text)
 
-    def writeToPrimaryArea(self, page):
+    def writeToPrimaryArea(self, page, offset):
         self.DISK_WRITES += 1
-        with open("PrimaryArea.bin", "wb") as f:
-            f.write(page)
+        with open("PrimaryArea.bin", "r+b") as f:
+            f.seek(offset)
+            serialize(page, f)
+            #serialize(';', f)
 
     def readPageFromPrimaryArea(self, offset):
         self.DISK_READS += 1
-        # 0:0 KEY:STUDENT_INDEX:SCORE1:SCORE2:SCORE3:X:Y
-        page = Page()
-        offset *= RECORDS_PER_PAGE  # making it index in lines list
-        with open("PrimaryArea.bin", "rb") as fp:
-            for i, line in enumerate(fp):
-                if i >= index+4:
-                    break
-                elif i >= index:
-                    line = line[index][4:].split(':')
-                    record = Record(line[0], line[1], [line[2], line[3], line[4]], )
-        # zamień te 4 na stronę i ją zwróć
-
-        line = line[index][4:].split(':')
-        line.split(':')
-        page.entries.append(lines[index][4:].split(':'))
+        with open("PrimaryArea.bin", "rb") as f:
+            f.seek(offset)
+            return deserialize(f)
 
     @property
     def primaryAreaSize(self):
@@ -76,8 +66,8 @@ class Page:
         else:
             # bisect check where to insert
             # CHECK IF SEARCH_KEY WORKS
-            i = bisect.bisect_left(self.entries, searchKey)
-            self.entries.insert(i, record)
+            bisect.insort_left(self.entries, record)
+            # self.entries.insert(i, record)
             return 'inserted'
 
 
@@ -108,6 +98,9 @@ class Record:
             self.scores = [2.0, 3.5, 5.0]  # list of 3 default scores
         self.overflowPointer = overflowPointer
         # probably some getOverflow() method
+
+    def __lt__(self, other):
+        return self.key < other.key
 
 
 class PrimaryArea:
@@ -159,6 +152,7 @@ class IndexedSequentialFile:
         # self.FM.writeRecordToPage
         if result != 'inserted':
             self.overflow_area.addRecordToChain(record, result)
+        self.FM.writeToPrimaryArea(page, page_offset)
 
     def readRecord(self, key):
         page = self.index.getPageOffset(key)
@@ -169,7 +163,7 @@ class IndexedSequentialFile:
             new_page = self.primary_area.makePage()
             new_page.insertRecord(record)
             # Page ready -> Write page to PrimaryArea
-            self.FM.writeToPrimaryArea(new_page)
+            self.FM.writeToPrimaryArea(new_page, 0)
             # Create index entry
             self.index.makeEntry(record.key, 0)
         # rest later, now 1st record should work fine
@@ -178,6 +172,10 @@ class IndexedSequentialFile:
 ISFile = IndexedSequentialFile()
 
 # TEST
+
+with open("PrimaryArea.bin", 'w'):
+    pass
+
 ISFile.insertRecord(Record(5))
 ISFile.insertRecord(Record(8))
 ISFile.insertRecord(Record(11))
@@ -224,5 +222,7 @@ ISFile.insertRecord(Record(8))
 #reorginise when want to put lower than can
 #classes to and from txt, will this work just like that?? Potential error
 #check for reorganizations
+
+#rozmiar przy 4 wpisach to 330B, spróbuję robić offsety co 450B
 
 print('x')
