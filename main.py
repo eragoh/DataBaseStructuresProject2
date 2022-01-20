@@ -114,6 +114,7 @@ class IndexedSequentialFile:
     def insertRecord(self, record):
         page = self.index.getPage(record.key)
         if page is None:
+            # REORGANISE, can't just make new page, index needs to be sorted after that
             page = self.primary_area.makePage()
             self.index.makeEntry(record.key, page)
         result = page.insertRecord(record)
