@@ -4,11 +4,25 @@
 # record::::student index + his 3 scores + key(natural number)
 # sorting by key
 
+import bisect
+
 RECORDS_PER_PAGE = 4  # Blocking factor for primary area
+DISK_READS = 0
+DISK_WRITES = 0
 
 
 def sortingKey(o):
     return o.key
+
+
+class FileManager:
+    def readFromFile(self, file):
+        with open(file, "r") as f:
+            return f.read()
+
+    def writeToFile(self, file, text):
+        with open(file, "w") as f:
+            return f.write(text)
 
 
 class Page:
@@ -24,6 +38,8 @@ class Page:
                     return entry  # return start of overflow chain
             return "ERROR 404"
         else:
+            global DISK_WRITES
+            DISK_WRITES += 1
             self.page_entries.append(record)
             self.page_entries.sort(key=sortingKey)
             return 'inserted'
@@ -31,18 +47,20 @@ class Page:
 
 class Index:
     def __init__(self):
-        self.key_page_dictionary = {}
+        self.key_page_map = []
         iFile = open("index.bin", 'wb')
 
     def getPage(self, key):
-        for i in range(key, -1, -1):
-            if i in self.key_page_dictionary:
-                return self.key_page_dictionary[i]
+        global DISK_READS
+        DISK_READS += 1
+        i = bisect.bisect_left(self.key_page_map, (key,)) - 1
+        if i != -1:
+            return self.key_page_map[i][1]
         return None  # None, if no page corresponding with such key found
 
     def makeEntry(self, key, page):
         # make an entry with given key and page
-        self.key_page_dictionary[key] = page
+        self.key_page_map.append((key, page))
 
 
 class Record:
@@ -72,14 +90,20 @@ class OverflowArea:
     records = []
 
     def addRecordToChain(self, record, chain_start):
-        self.getLastRecordInChain(chain_start).overflowPointer = record  # insert record at the end of chain
-        self.records.append(record)  # HERE WRITE TO FILE INSTEAD
-
-    def getLastRecordInChain(self, record):
-        if record.overflowPointer is None:
-            return record
+        global DISK_WRITES
+        while chain_start.overflowPointer is not None:
+            if chain_start.overflowPointer.key < record.key:
+                chain_start = chain_start.overflowPointer
+            else:
+                break
+        if chain_start.overflowPointer is None:
+            DISK_WRITES += 1
+            chain_start.overflowPointer = record
         else:
-            return self.getLastRecordInChain(record.overflowPointer)
+            DISK_WRITES += 3
+            record.overflowPointer = chain_start.overflowPointer
+            chain_start.overflowPointer = record
+        self.records.append(record)  # HERE WRITE TO FILE INSTEAD
 
 
 class IndexedSequentialFile:
@@ -96,12 +120,30 @@ class IndexedSequentialFile:
         if result != 'inserted':
             self.overflow_area.addRecordToChain(record, result)
 
+    def readRecord(self, key):
+        page = self.index.getPage(key)
+
 
 ISFile = IndexedSequentialFile()
+
+ISFile.insertRecord(Record(5))
+ISFile.insertRecord(Record(8))
+ISFile.insertRecord(Record(11))
+ISFile.insertRecord(Record(21))
+ISFile.insertRecord(Record(7))
+ISFile.insertRecord(Record(12))
+ISFile.insertRecord(Record(13))
+ISFile.insertRecord(Record(14))
+ISFile.insertRecord(Record(6))
+
 ISFile.insertRecord(Record(1))
 ISFile.insertRecord(Record(4))
 ISFile.insertRecord(Record(7))
 ISFile.insertRecord(Record(2))
 ISFile.insertRecord(Record(9))
 ISFile.insertRecord(Record(8))
+
+# +reorganization
+# I assume that Index is all in RAM memory, so no disk operations needed here
+# I assume overflow doesn't have pages
 print('x')
