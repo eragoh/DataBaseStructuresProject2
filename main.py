@@ -5,17 +5,22 @@
 # sorting by key
 
 import bisect
+from os.path import getsize
 
 RECORDS_PER_PAGE = 4  # Blocking factor for primary area
 DISK_READS = 0
 DISK_WRITES = 0
+ALPHA = 0.5  # How much of each page is utilise after each reorganization
 
 
-def sortingKey(o):
+def searchKey(o):
     return o.key
 
 
 class FileManager:
+    DISK_READS = 0
+    DISK_WRITES = 0
+
     def readFromFile(self, file):
         with open(file, "r") as f:
             return f.read()
@@ -24,24 +29,55 @@ class FileManager:
         with open(file, "w") as f:
             return f.write(text)
 
+    def writeToPrimaryArea(self, page):
+        self.DISK_WRITES += 1
+        with open("PrimaryArea.bin", "wb") as f:
+            f.write(page)
+
+    def readPageFromPrimaryArea(self, offset):
+        self.DISK_READS += 1
+        # 0:0 KEY:STUDENT_INDEX:SCORE1:SCORE2:SCORE3:X:Y
+        page = Page()
+        offset *= RECORDS_PER_PAGE  # making it index in lines list
+        with open("PrimaryArea.bin", "rb") as fp:
+            for i, line in enumerate(fp):
+                if i >= index+4:
+                    break
+                elif i >= index:
+                    line = line[index][4:].split(':')
+                    record = Record(line[0], line[1], [line[2], line[3], line[4]], )
+        # zamień te 4 na stronę i ją zwróć
+
+        line = line[index][4:].split(':')
+        line.split(':')
+        page.entries.append(lines[index][4:].split(':'))
+
+    @property
+    def primaryAreaSize(self):
+        return getsize("PrimaryArea.bin")
+
+    @property
+    def overflowAreaSize(self):
+        return getsize("OverflowArea.bin")
+
 
 class Page:
     def __init__(self):
-        self.page_entries = []
+        self.entries = []
         # SAVE PAGE
 
     def insertRecord(self, record):
-        if len(self.page_entries) == RECORDS_PER_PAGE:
+        if len(self.entries) == RECORDS_PER_PAGE:
             # assign it to overflow of a record
-            for entry in reversed(self.page_entries):
+            for entry in reversed(self.entries):
                 if record.key > entry.key:
                     return entry  # return start of overflow chain
             return "ERROR 404"
         else:
-            global DISK_WRITES
-            DISK_WRITES += 1
-            self.page_entries.append(record)
-            self.page_entries.sort(key=sortingKey)
+            # bisect check where to insert
+            # CHECK IF SEARCH_KEY WORKS
+            i = bisect.bisect_left(self.entries, searchKey)
+            self.entries.insert(i, record)
             return 'inserted'
 
 
@@ -50,17 +86,17 @@ class Index:
         self.key_page_map = []
         iFile = open("index.bin", 'wb')
 
-    def getPage(self, key):
+    def getPageOffset(self, key):
         global DISK_READS
         DISK_READS += 1
-        i = bisect.bisect_left(self.key_page_map, (key,)) - 1
+        i = bisect.bisect_left(self.key_page_map, (key, )) - 1
         if i != -1:
             return self.key_page_map[i][1]
         return None  # None, if no page corresponding with such key found
 
-    def makeEntry(self, key, page):
-        # make an entry with given key and page
-        self.key_page_map.append((key, page))
+    def makeEntry(self, key, page_offset):
+        # make an entry with given key and page offset
+        self.key_page_map.append((key, page_offset))
 
 
 class Record:
@@ -75,14 +111,14 @@ class Record:
 
 
 class PrimaryArea:
-    pages = []
+    pages_number = 0
 
     def __init__(self):
         pass
 
     def makePage(self):
         new_page = Page()
-        self.pages.append(new_page)  # HERE WRITE TO FILE INSTEAD
+        self.pages_number += 1
         return new_page
 
 
@@ -110,23 +146,38 @@ class IndexedSequentialFile:
     index = Index()
     primary_area = PrimaryArea()
     overflow_area = OverflowArea()
+    FM = FileManager()
 
     def insertRecord(self, record):
-        page = self.index.getPage(record.key)
-        if page is None:
+        page_offset = self.index.getPageOffset(record.key)
+        if page_offset is None:
             # REORGANISE, can't just make new page, index needs to be sorted after that
-            page = self.primary_area.makePage()
-            self.index.makeEntry(record.key, page)
+            self.reorganizeWithRecord(record)
+            return
+        page = self.FM.readPageFromPrimaryArea(page_offset)
         result = page.insertRecord(record)
+        # self.FM.writeRecordToPage
         if result != 'inserted':
             self.overflow_area.addRecordToChain(record, result)
 
     def readRecord(self, key):
-        page = self.index.getPage(key)
+        page = self.index.getPageOffset(key)
+
+    def reorganizeWithRecord(self, record):
+        if self.FM.primaryAreaSize + self.FM.overflowAreaSize == 0:
+            # this record is the first one
+            new_page = self.primary_area.makePage()
+            new_page.insertRecord(record)
+            # Page ready -> Write page to PrimaryArea
+            self.FM.writeToPrimaryArea(new_page)
+            # Create index entry
+            self.index.makeEntry(record.key, 0)
+        # rest later, now 1st record should work fine
 
 
 ISFile = IndexedSequentialFile()
 
+# TEST
 ISFile.insertRecord(Record(5))
 ISFile.insertRecord(Record(8))
 ISFile.insertRecord(Record(11))
@@ -147,4 +198,31 @@ ISFile.insertRecord(Record(8))
 # +reorganization
 # I assume that Index is all in RAM memory, so no disk operations needed here
 # I assume overflow doesn't have pages
+
+# Lets make it with indexes, overflow will be paged now, so pages will have index
+# OverflowPointer will have (x,y) format, where x is a page number of overflow area
+# and y is a record number on this page (y<RECORDS_PER_PAGE)
+
+# Still Index in RAM? Cause i should decide if I page it, and then I have to count disk ops
+
+# makeEntry will need rebuild when implementing reorganization
+
+# what if next record is smaller than smalles at the moment? Reorganise?
+# I can always start with 1 so then there will be no problem
+
+# PrimaryArea data format:
+# 0:0 KEY:STUDENT_INDEX:SCORE1:SCORE2:SCORE3:X:Y
+# 0:1 None
+# 0:2 None
+# 0:3 None
+# 1:0 None etc.
+# 1:1
+# 1:2
+
+#insert
+#seek
+#reorginise when want to put lower than can
+#classes to and from txt, will this work just like that?? Potential error
+#check for reorganizations
+
 print('x')
